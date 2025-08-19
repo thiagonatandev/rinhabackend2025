@@ -1,0 +1,9 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  correlation_id: 
+  amount: 9.99
+
+two:
+  correlation_id: 
+  amount: 9.99
