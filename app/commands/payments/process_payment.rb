@@ -1,8 +1,7 @@
-# app/commands/payments/process_payment.rb
 module Payments
   class ProcessPayment
-    DEFAULT_URL  = "http://payment-processor-default:8080/payments"
-    FALLBACK_URL = "http://payment-processor-fallback:8080/payments"
+    default_url = CheckProcessorHealth::DEFAULT_URL
+    fallback_url = CheckProcessorHealth::FALLBACK_URL
 
     def initialize(correlation_id:, amount:)
       @correlation_id = correlation_id
@@ -17,12 +16,12 @@ module Payments
 
       case selected_processor
       when "default"
-        process_with_retry(DEFAULT_URL, "default")
+        process_with_retry(default_url, "default")
       when "fallback"
-        process_with_retry(FALLBACK_URL, "fallback")
+        process_with_retry(fallback_url, "fallback")
       else
-        process_with_retry(DEFAULT_URL, "default") ||
-        process_with_retry(FALLBACK_URL, "fallback") ||
+        process_with_retry(default_url, "default") ||
+        process_with_retry(fallback_url, "fallback") ||
         failure
       end
     end
@@ -45,7 +44,7 @@ module Payments
     end
 
     def process_with_default
-      result = try_processor(DEFAULT_URL, "default")
+      result = try_processor(default_url, "default")
       if result && result[:success]
         create_payment_record(result)
         return result
@@ -54,7 +53,7 @@ module Payments
     end
 
     def process_with_fallback
-      result = try_processor(FALLBACK_URL, "fallback")
+      result = try_processor(fallback_url, "fallback")
       if result && result[:success]
         create_payment_record(result)
         return result
