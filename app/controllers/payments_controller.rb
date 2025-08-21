@@ -1,15 +1,20 @@
 class PaymentsController < ApplicationController
   def create
-    payment = Payment.new(payment_params)
+    result = Payments::ProcessPayment.new(
+      correlation_id: params[:correlationId],
+      amount: params[:amount]
+    ).call
 
-    if payment.save
-      render json: payment, status: :created
+    if result[:success]
+      Payment.create!(
+        correlation_id: params[:correlationId],
+        amount: params[:amount],
+        processor: result[:processor],
+        requested_at: Time.now.utc
+      )
+      head :created
     else
-      render json: { errors: payment.errors.full_messages }, status: :unprocessable_entity
+      render json: { error: "Payment processors unavailable" }, status: :service_unavailable
     end
-  end
-
-  def payment_params
-    params.permit(:amount).merge(correlation_id: params[:correlationId])
   end
 end
