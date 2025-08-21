@@ -84,6 +84,39 @@ services:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres-socket-02:/var/run/postgresql
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - default
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "100MB"
+
+  sidekiq:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sidekiq
+    command: bundle exec sidekiq -q payments -q default -c 5
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - RAILS_ENV=development
+    depends_on:
+      - redis
+      - rails-db
+    networks:
+      - default
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "200MB"
+
   rails-app:
     build:
       context: .
@@ -97,7 +130,7 @@ services:
       - RAILS_ENV=development
       - DATABASE_URL=postgres://postgres:postgres@rails-db:5432/rails_app
     ports:
-      - 3000:3000
+      - 9999:3000
     depends_on:
       - rails-db
       - payment-processor-1
