@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_08_21_134710) do
+ActiveRecord::Schema[8.0].define(version: 2025_08_21_145630) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -20,6 +20,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_08_21_134710) do
     t.integer "status", default: 0, null: false
     t.string "processor"
     t.datetime "requested_at"
+    t.datetime "created_at"
+    t.datetime "updated_at"
+    t.index ["correlation_id"], name: "index_payments_on_correlation_id", unique: true
   end
 
   create_table "test_payments", force: :cascade do |t|
