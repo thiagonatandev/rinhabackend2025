@@ -1,35 +1,47 @@
 module Payments
-  class CheckProcessorHealth
-    DEFAULT_URL = "http://payment-processor-default:8080/admin/service-health"
-    FALLBACK_URL = "http://payment-processor-fallback:8080/admin/service-health"
+  class SelectBestProcessor
+    CHECK_INTERVAL = 5.seconds
 
-    def initialize(processor_name)
-      @processor_name = processor_name
-      @url = processor_name == "default" ? DEFAULT_URL : FALLBACK_URL
-    end
+    class << self
+      def call
+        @last_check ||= {}
+        @last_result ||= {}
 
-    def call
-      start_time = Time.now
-      response = Faraday.get(@url) do |req|
-        req.options.timeout = 1
-        req.options.open_timeout = 1
+        if @last_check[:time].nil? || Time.now - @last_check[:time] > CHECK_INTERVAL
+          refresh_health_data
+        end
+
+        choose_processor
       end
 
-      response_time = (Time.now - start_time) * 1000
+      private
 
-      {
-        healthy: response.success?,
-        response_time: response_time,
-        status: response.status,
-        processor: @processor_name
-      }
-    rescue Faraday::Error => e
-      {
-        healthy: false,
-        response_time: 1000,
-        error: e.message,
-        processor: @processor_name
-      }
+      def refresh_health_data
+        default_check = CheckProcessorHealth.new("default").call
+        fallback_check = CheckProcessorHealth.new("fallback").call
+
+        @last_result = {
+          default: default_check,
+          fallback: fallback_check
+        }
+
+        @last_check = { time: Time.now }
+      end
+
+      def choose_processor
+        default_health = @last_result[:default]
+        fallback_health = @last_result[:fallback]
+
+        if default_health[:healthy] && !fallback_health[:healthy]
+          "default"
+        elsif fallback_health[:healthy] && !default_health[:healthy]
+          "fallback"
+        elsif default_health[:healthy] && fallback_health[:healthy]
+          default_health[:response_time] <= fallback_health[:response_time] ? "default" : "fallback"
+        else
+          "default"
+        end
+      end
     end
   end
 end
