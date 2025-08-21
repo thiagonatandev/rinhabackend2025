@@ -1,7 +1,9 @@
 module Payments
   class ProcessPayment
-    default_url = CheckProcessorHealth::DEFAULT_URL
-    fallback_url = CheckProcessorHealth::FALLBACK_URL
+    DEFAULT_URL = "http://payment-processor-default:8080/payments"
+    FALLBACK_URL = "http://payment-processor-fallback:8080/payments"
+
+    MAX_RETRIES = 3
 
     def initialize(correlation_id:, amount:)
       @correlation_id = correlation_id
@@ -12,89 +14,57 @@ module Payments
     def call
       return { success: false, processor: "duplicate" } if duplicate?
 
-      selected_processor = SelectBestProcessor.call
+      processor = SelectBestProcessor.call
+      result = try_with_retry(processor)
 
-      case selected_processor
-      when "default"
-        process_with_retry(default_url, "default")
-      when "fallback"
-        process_with_retry(fallback_url, "fallback")
-      else
-        process_with_retry(default_url, "default") ||
-        process_with_retry(fallback_url, "fallback") ||
-        failure
+      unless result[:success] && processor == "default"
+        # tenta fallback se default falhar
+        result ||= try_with_retry("fallback") unless processor == "fallback"
       end
+
+      result || failure
     end
 
     private
 
-    def process_with_retry(url, processor_name, retries = 2)
-      retries.times do |attempt|
-        result = try_processor(url, processor_name)
-        return result if result && result[:success]
-
-        sleep(0.1 * (attempt + 1))
-      end
-
-      nil
-    end
-
     def duplicate?
-      Payment.exists?(correlation_id: @correlation_id)
+      key = "payment:#{@correlation_id}"
+      !Sidekiq.redis { |conn| conn.set(key, 1, ex: 1.hour, nx: true) }
     end
 
-    def process_with_default
-      result = try_processor(default_url, "default")
-      if result && result[:success]
-        create_payment_record(result)
-        return result
-      end
-      nil
-    end
+    def try_with_retry(processor_name)
+      url = processor_name == "default" ? DEFAULT_URL : FALLBACK_URL
 
-    def process_with_fallback
-      result = try_processor(fallback_url, "fallback")
-      if result && result[:success]
-        create_payment_record(result)
-        return result
+      MAX_RETRIES.times do |attempt|
+        result = try_processor(url, processor_name)
+        return result if result[:success]
+
+        sleep(0.2 * (2 ** attempt))
       end
+
       nil
     end
 
     def try_processor(url, name)
-      response = send_request(url)
-      return { success: true, processor: name } if response.success?
-      nil
-    end
-
-    def send_request(url)
-      Faraday.post(url) do |req|
+      response = Faraday.post(url) do |req|
         req.headers["Content-Type"] = "application/json"
-        req.options.timeout = 5
-        req.options.open_timeout = 2
+        req.options.open_timeout = 3
+        req.options.timeout = 10
         req.body = {
           correlationId: @correlation_id,
           amount: @amount,
           requestedAt: @requested_at
         }.to_json
       end
-    rescue Faraday::Error => e
-      Rails.logger.error "Payment processor error for #{url}: #{e.message}"
-      OpenStruct.new(success?: false)
-    end
 
-    def create_payment_record(result)
-      Payment.create!(
-        correlation_id: @correlation_id,
-        amount: @amount,
-        processor: result[:processor],
-        status: :success,
-        requested_at: Time.now.utc
-      )
+      { success: response.status == 200, processor: name }
+    rescue Faraday::Error => e
+      Rails.logger.warn "Payment processor #{name} failed: #{e.message}"
+      { success: false, processor: name }
     end
 
     def failure
-      Rails.logger.error "All payment processors failed for: #{@correlation_id}"
+      Rails.logger.error "All payment processors failed for #{@correlation_id}"
       { success: false, processor: "all_failed" }
     end
   end

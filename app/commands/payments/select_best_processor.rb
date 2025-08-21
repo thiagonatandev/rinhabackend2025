@@ -4,40 +4,51 @@ module Payments
 
     class << self
       def call
-        @last_check ||= {}
-        @last_result ||= {}
-
-        if @last_check[:time].nil? || Time.now - @last_check[:time] > CHECK_INTERVAL
-          refresh_health_data
-        end
-
+        refresh_health_if_needed
         choose_processor
       end
 
       private
 
-      def refresh_health_data
-        default_check = CheckProcessorHealth.new("default").call
-        fallback_check = CheckProcessorHealth.new("fallback").call
+      def refresh_health_if_needed
+        @last_check ||= Time.at(0)
+        return if Time.now - @last_check < CHECK_INTERVAL
 
         @last_result = {
-          default: default_check,
-          fallback: fallback_check
+          default: check_processor("default"),
+          fallback: check_processor("fallback")
         }
+        @last_check = Time.now
+      end
 
-        @last_check = { time: Time.now }
+      def check_processor(name)
+        url = name == "default" ? "http://payment-processor-default:8080/payments/service-health" :
+                                  "http://payment-processor-fallback:8080/payments/service-health"
+        response = Faraday.get(url) do |req|
+          req.options.timeout = 2
+          req.options.open_timeout = 1
+        end
+
+        if response.status == 200
+          data = JSON.parse(response.body)
+          { healthy: !data["failing"], response_time: data["minResponseTime"] }
+        else
+          { healthy: false, response_time: 1000 }
+        end
+      rescue Faraday::Error => e
+        { healthy: false, response_time: 1000, error: e.message }
       end
 
       def choose_processor
         default_health = @last_result[:default]
         fallback_health = @last_result[:fallback]
 
-        if default_health[:healthy] && !fallback_health[:healthy]
-          "default"
-        elsif fallback_health[:healthy] && !default_health[:healthy]
-          "fallback"
-        elsif default_health[:healthy] && fallback_health[:healthy]
+        if default_health[:healthy] && fallback_health[:healthy]
           default_health[:response_time] <= fallback_health[:response_time] ? "default" : "fallback"
+        elsif default_health[:healthy]
+          "default"
+        elsif fallback_health[:healthy]
+          "fallback"
         else
           "default"
         end
