@@ -33,10 +33,10 @@ module Payments
       retries.times do |attempt|
         result = try_processor(url, processor_name)
         return result if result && result[:success]
-        
+
         sleep(0.1 * (attempt + 1))
       end
-      
+
       nil
     end
 
