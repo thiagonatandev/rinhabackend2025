@@ -2,7 +2,7 @@ x-service-templates:
   payment-processor: &payment-processor
     image: zanfranceschi/payment-processor:amd64-20250807222453
     networks:
-      - payment-processor
+      - app-network
       - payment-processor-db
     deploy:
       restart_policy:
@@ -90,7 +90,7 @@ services:
     ports:
       - "6379:6379"
     networks:
-      - default
+      - app-network
     deploy:
       resources:
         limits:
@@ -110,34 +110,77 @@ services:
       - redis
       - rails-db
     networks:
-      - default
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: "200MB"
+      - app-network
 
-  rails-app:
+  rails-app1:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: rails-app
-    hostname: rails-app
+    container_name: rails-app1
+    hostname: rails-app1
     command: bash -c "bundle exec rails db:prepare && bundle exec rails s -b 0.0.0.0 -p 3000"
     volumes:
       - .:/app
     environment:
       - RAILS_ENV=development
       - DATABASE_URL=postgres://postgres:postgres@rails-db:5432/rails_app
-    ports:
-      - 9999:3000
+    networks:
+      - app-network
     depends_on:
       - rails-db
       - payment-processor-1
       - payment-processor-2
+
+  rails-app2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rails-app2
+    hostname: rails-app2
+    command: bash -c "bundle exec rails db:prepare && bundle exec rails s -b 0.0.0.0 -p 3000"
+    volumes:
+      - .:/app
+    environment:
+      - RAILS_ENV=development
+      - DATABASE_URL=postgres://postgres:postgres@rails-db:5432/rails_app
     networks:
-      - default
-      - payment-processor
+      - app-network
+    depends_on:
+      - rails-db
+      - payment-processor-1
+      - payment-processor-2
+
+  rails-app3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rails-app3
+    hostname: rails-app3
+    command: bash -c "bundle exec rails db:prepare && bundle exec rails s -b 0.0.0.0 -p 3000"
+    volumes:
+      - .:/app
+    environment:
+      - RAILS_ENV=development
+      - DATABASE_URL=postgres://postgres:postgres@rails-db:5432/rails_app
+    networks:
+      - app-network
+    depends_on:
+      - rails-db
+      - payment-processor-1
+      - payment-processor-2
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "9999:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - rails-app1
+      - rails-app2
+      - rails-app3
+    networks:
+      - app-network
 
   rails-db:
     image: postgres:17-alpine
@@ -149,6 +192,8 @@ services:
       - POSTGRES_DB=rails_app
     volumes:
       - rails-postgres-data:/var/lib/postgresql/data
+    networks:
+      - app-network
     deploy:
       resources:
         limits:
@@ -156,8 +201,7 @@ services:
           memory: "200MB"
 
 networks:
-  payment-processor:
-    name: payment-processor
+  app-network:
     driver: bridge
   payment-processor-db:
     driver: bridge
